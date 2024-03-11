@@ -92,17 +92,28 @@ class Server
         }
         if (receiveMessage.ToLower() == "/exit")
         {
-            string exitModeMessage = $"Вы вышли из чата с {clientsNames[localChats[clientID]]}";
-            byte[] exitModeMsg = Encoding.UTF8.GetBytes(exitModeMessage);
-            SendToClient(exitModeMsg, clientID);
+            string exitChatMessage = $"Вы вышли из чата с {clientsNames[localChats[clientID]]}";
+            byte[] exitChatMsg = Encoding.UTF8.GetBytes(exitChatMessage);
+            SendToClient(exitChatMsg, clientID);
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"Клиент {clientsNames[clientID]} прервал с Вами общение.");
+            sb.AppendLine($"Для продолжения общения с другими пользователями введите /1, для выхода из приложения введите /2.");
+            exitChatMsg = Encoding.UTF8.GetBytes(sb.ToString());
+            SendToClient(exitChatMsg, localChats[clientID]);
+            int value = localChats[clientID];
+            localChats.Remove(clientID);
+            localChats.Remove(value);
             isLocalChatStarted = false;
             isFirstMessage = true;
         }
-        StringBuilder sb = new StringBuilder();
-        sb.Append($"{clientsNames[clientID]}: ");
-        sb.Append(receiveMessage);
-        byteMessage = Encoding.UTF8.GetBytes(sb.ToString());
-        SendToClient(byteMessage, localChats[clientID]);
+        else
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append($"{clientsNames[clientID]}: ");
+            sb.Append(receiveMessage);
+            byteMessage = Encoding.UTF8.GetBytes(sb.ToString());
+            SendToClient(byteMessage, localChats[clientID]);
+        }
     }
     private void CheckMessage(string receivedMessage, Socket clientSocket, int clientID, string clientName)
     {
@@ -124,8 +135,6 @@ class Server
                 {
                     isLocalChatStarted = true;
                     localChats.Add(clientID, Int32.Parse(receivedMessage)); 
-                    //currentLocalClientID = Int32.Parse(receivedMessage);
-               ///////////////////////////////////////////////////////////////
                 }
                 else
                 {
