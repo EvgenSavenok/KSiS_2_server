@@ -5,14 +5,13 @@ class Server
 {
     int nextClientID = 0;
     string prevMessage = null;
-    bool isLocalChatStarted = false, isFirstMessage = true;
     Dictionary<int, Socket> clientsSockets = new Dictionary<int, Socket>();
     Dictionary<int, string> clientsNames = new Dictionary<int, string>();
     Dictionary<int, int> localChats = new Dictionary<int, int>();
     private IPEndPoint? GetData()
     {
         int port;
-        bool isCorrect = true;
+        bool isCorrect;
         IPEndPoint localEndPoint = null;
         do
         {
@@ -27,7 +26,7 @@ class Server
                 IPAddress ipAddress = IPAddress.Parse(Console.ReadLine());
                 localEndPoint = new IPEndPoint(ipAddress, port);
             }
-            catch (SocketException)
+            catch (Exception)
             {
                 isCorrect = false;  
             }
@@ -52,21 +51,35 @@ class Server
         }
         return listener;
     }
+
+    private void SendToAllClients(string mes, int clientID)
+    {
+        byte[] byreMes = Encoding.UTF8.GetBytes(mes);
+        foreach (var client in clientsSockets)
+        {
+            if (client.Key != clientID)
+            {
+                client.Value.Send(byreMes);
+            }
+        }
+    }
     private void DisconnectClient(Socket clientSocket, int clientID, string clientName)
     {
         clientSocket.Shutdown(SocketShutdown.Both);
         clientSocket.Close();
         clientsSockets.Remove(clientID);
         clientsNames.Remove(clientID);
-        Console.WriteLine($"Пользователь с ID {clientID} и именем {clientName} покинул чат.");
+        string mes = $"Пользователь с ID {clientID} и именем {clientName} покинул чат.";
+        Console.WriteLine(mes);
+        SendToAllClients(mes, clientID);
     }
     private void OutputTableOfUsers(string clientName, int clientID)
     {
         StringBuilder sb = new StringBuilder();
         Console.WriteLine($"Пользователь {clientName} с ID {clientID} запросил список всех пользователей.");
-        sb.AppendLine("Список всех пользователей:");
+        sb.Append("Список всех пользователей:");
         foreach (var line in clientsNames)
-            sb.AppendLine($"Имя: {line.Value}, ID: {line.Key}");
+            sb.Append($"\nИмя: {line.Value}, ID: {line.Key}");
         byte[] byteMessage = Encoding.UTF8.GetBytes(sb.ToString());
         clientsSockets[clientID].Send(byteMessage);
     }
@@ -77,7 +90,7 @@ class Server
             clientsSockets[clientID].Send(message);
         }
     }
-    private void StartLocalChatWithClient(string receiveMessage, Socket clientSocket, int clientID)
+    private void StartLocalChatWithClient(string receiveMessage, Socket clientSocket, int clientID, ref bool isLocalChatStarted, ref bool isFirstMessage)
     {
         byte[] byteMessage;
         if (isFirstMessage)
@@ -115,14 +128,14 @@ class Server
             SendToClient(byteMessage, localChats[clientID]);
         }
     }
-    private void CheckMessage(string receivedMessage, Socket clientSocket, int clientID, string clientName)
+    private void CheckMessage(string receivedMessage, Socket clientSocket, int clientID, string clientName, ref bool isLocalChatStarted, ref bool isFirstMessage)
     {
-        if (receivedMessage == "/1")
+        if (receivedMessage == "/1" && !isLocalChatStarted)
         {
             OutputTableOfUsers(clientName, clientID);
             prevMessage = receivedMessage;
         }
-        else if (receivedMessage == "/2")
+        else if (receivedMessage == "/2" && !isLocalChatStarted)
         {
             DisconnectClient(clientSocket, clientID, clientName);
             return;
@@ -133,8 +146,17 @@ class Server
             {
                 if (clientsNames.ContainsKey(Int32.Parse(receivedMessage)) && (clientID != Int32.Parse(receivedMessage)))
                 {
-                    isLocalChatStarted = true;
-                    localChats.Add(clientID, Int32.Parse(receivedMessage)); 
+                    if (!localChats.ContainsValue(Int32.Parse(receivedMessage)) && !localChats.ContainsKey(Int32.Parse(receivedMessage)))
+                    {
+                        isLocalChatStarted = true;
+                        localChats.Add(clientID, Int32.Parse(receivedMessage));
+                    }
+                    else
+                    {
+                        string errorMessage = $"Пользователь в данный момент занят перепиской с другим пользователем.";
+                        byte[] errorBytes = Encoding.UTF8.GetBytes(errorMessage);
+                        SendToClient(errorBytes, clientID);
+                    }
                 }
                 else
                 {
@@ -152,25 +174,39 @@ class Server
         if (isLocalChatStarted)
         {
             prevMessage = null;
-            StartLocalChatWithClient(receivedMessage, clientSocket, clientID);
+            StartLocalChatWithClient(receivedMessage, clientSocket, clientID, ref isLocalChatStarted, ref isFirstMessage);
         }
     }
     private void HandleClient(Socket clientSocket, int clientID, string clientName)
     {
         try
         {
+            bool isLocalChatStarted = false;
+            bool isFirstMessage = true;
             while (true)
             {
                 byte[] buffer = new byte[1024];
-                int numOfBytes = clientSocket.Receive(buffer);
-                if (numOfBytes == 0)
+                int numOfBytes;
+                try
+                {
+                    numOfBytes = clientSocket.Receive(buffer);
+                }
+                catch (SocketException e) 
                 {
                     DisconnectClient(clientSocket, clientID, clientName);
                     break;
                 }
                 string receivedMessage = Encoding.UTF8.GetString(buffer, 0, numOfBytes);
                 Console.WriteLine($"Получено от клиента с ID {clientID}: {receivedMessage}");
-                CheckMessage(receivedMessage, clientSocket, clientID, clientName);
+                if (receivedMessage != "/1" && receivedMessage != "/2")
+                {
+                    if (localChats.ContainsKey(clientID))
+                    {
+                        isLocalChatStarted = true;
+                        isFirstMessage = false;
+                    }
+                }
+                CheckMessage(receivedMessage, clientSocket, clientID, clientName, ref isLocalChatStarted, ref isFirstMessage);
             }
         }
         catch (SocketException e)
@@ -210,7 +246,8 @@ class Server
         }
         finally
         {
-            Disconnect();
+            foreach (var client in clientsSockets)
+                DisconnectClient(client.Value, client.Key, clientsNames[client.Key]);
         }
     }
     public void StartWorkingOfServer()
@@ -220,12 +257,5 @@ class Server
         IPEndPoint localEndPoint = GetData();
         Socket listener = TryConnectToPort(localEndPoint);
         TryToStartListening(localEndPoint, listener);
-    }
-    private void Disconnect()
-    {
-        /*foreach (var client in clients)
-        {
-           // client.Close(); 
-        }*/ 
     }
 }
